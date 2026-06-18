@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hornvin/localization/app_localizations.dart';
 import 'package:hornvin/repositories/invoice_repository.dart';
+import 'package:hornvin/services/garage_payment_qr_storage.dart';
 import 'package:hornvin/utils/friendly_error.dart';
 import 'package:hornvin/widgets/app_theme.dart.dart';
 import 'package:open_filex/open_filex.dart';
@@ -588,6 +589,7 @@ class _InvoiceViewScreenState extends State<InvoiceViewScreen> {
     final customerDetails = _mapOf(invoice['customerDetails']);
     final items = [...invoiceItems, ...parts, ...services];
     final logo = await _loadPdfImage('assets/logo.png');
+    final garagePaymentQr = await _loadGaragePaymentQrImage();
 
     final invoiceNumber = _text(
       invoice['invoiceNumber'] ??
@@ -755,15 +757,43 @@ class _InvoiceViewScreenState extends State<InvoiceViewScreen> {
           _pdfBorderBox(
             child: pw.Padding(
               padding: const pw.EdgeInsets.all(6),
-              child: pw.Column(
+              child: pw.Row(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  pw.Text(
-                    'Payment Mode:',
-                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  pw.Expanded(
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          'Payment Mode:',
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                        ),
+                        pw.SizedBox(height: 6),
+                        pw.Text(_text(payment['paymentMode'], fallback: 'N/A')),
+                        pw.Text('Payment Status: $paymentStatus'),
+                        pw.Text('Balance: ${_money(balance)}'),
+                      ],
+                    ),
                   ),
-                  pw.SizedBox(height: 6),
-                  pw.Text(_text(payment['paymentMode'], fallback: 'N/A')),
+                  if (garagePaymentQr != null) ...[
+                    pw.SizedBox(width: 12),
+                    pw.Container(
+                      width: 92,
+                      child: pw.Column(
+                        children: [
+                          pw.Text(
+                            'Scan & Pay',
+                            style: pw.TextStyle(
+                              fontSize: 9,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
+                          pw.SizedBox(height: 4),
+                          pw.Image(garagePaymentQr, width: 76, height: 76),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -824,6 +854,17 @@ class _InvoiceViewScreenState extends State<InvoiceViewScreen> {
     try {
       final data = await rootBundle.load(assetPath);
       return pw.MemoryImage(data.buffer.asUint8List());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<pw.MemoryImage?> _loadGaragePaymentQrImage() async {
+    try {
+      final file = await GaragePaymentQrStorage.savedQrFile();
+      if (file == null) return null;
+
+      return pw.MemoryImage(await file.readAsBytes());
     } catch (_) {
       return null;
     }

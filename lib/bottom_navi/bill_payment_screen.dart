@@ -1,11 +1,13 @@
-import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hornvin/repositories/invoice_repository.dart';
+import 'package:hornvin/services/garage_payment_qr_storage.dart';
 import 'package:hornvin/widgets/app_theme.dart.dart';
 import 'package:hornvin/localization/app_localizations.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
 
 class BillPaymentScreen extends StatefulWidget {
   const BillPaymentScreen({super.key});
@@ -16,16 +18,20 @@ class BillPaymentScreen extends StatefulWidget {
 
 class _BillPaymentScreenState extends State<BillPaymentScreen> {
   final InvoiceRepository _repository = InvoiceRepository();
+  final ImagePicker _imagePicker = ImagePicker();
 
   List<Map<String, dynamic>> _invoices = [];
   Map<String, dynamic> _stats = {};
   bool _isLoading = true;
+  bool _isQrLoading = true;
   String? _errorMessage;
+  File? _garageQrFile;
 
   @override
   void initState() {
     super.initState();
     _loadBillingData();
+    _loadGaragePaymentQr();
   }
 
   Future<void> _loadBillingData() async {
@@ -217,490 +223,262 @@ class _BillPaymentScreenState extends State<BillPaymentScreen> {
   }
 
   Widget _buildScannerOption() {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
+    final qrFile = _garageQrFile;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        onTap: _openGarageQrScanner,
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.primary.withValues(alpha: 0.14)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 14,
-                offset: const Offset(0, 6),
-              ),
-            ],
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.14)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 58,
-                height: 58,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(
-                  Icons.qr_code_scanner_rounded,
-                  color: AppColors.primary,
-                  size: 31,
-                ),
-              ),
-              const SizedBox(width: 13),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Scan Garage QR',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.lato(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Garage payment QR scan karke bill pay kare',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.lato(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textSecondary,
-                        height: 1.15,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Container(
-                height: 38,
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  'Scan',
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildGarageQrPreview(qrFile),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Garage Payment QR',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.lato(
-                    fontSize: 12,
+                    fontSize: 15,
                     fontWeight: FontWeight.w900,
-                    color: Colors.white,
+                    color: AppColors.textPrimary,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 3),
+                Text(
+                  qrFile == null
+                      ? 'Apna UPI/payment QR upload kare'
+                      : 'Ye QR bill invoice me print hoga',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.lato(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _buildGarageQrActions(qrFile),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGarageQrPreview(File? qrFile) {
+    if (_isQrLoading) {
+      return Container(
+        width: 78,
+        height: 78,
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    if (qrFile == null) {
+      return Container(
+        width: 78,
+        height: 78,
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
+        ),
+        child: const Icon(
+          Icons.qr_code_2_rounded,
+          color: AppColors.primary,
+          size: 38,
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: 78,
+        height: 78,
+        color: Colors.white,
+        child: Image.file(
+          qrFile,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => const Icon(
+            Icons.broken_image_rounded,
+            color: AppColors.primary,
           ),
         ),
       ),
     );
   }
 
-  Future<void> _openGarageQrScanner() async {
-    final scannedValue = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(builder: (_) => const _GaragePaymentQrScannerPage()),
-    );
+  Widget _buildGarageQrActions(File? qrFile) {
+    if (_isQrLoading) return const SizedBox(height: 36);
 
-    if (!mounted || scannedValue == null || scannedValue.trim().isEmpty) {
+    if (qrFile == null) {
+      return Row(
+        children: [
+          _qrActionButton(
+            icon: Icons.upload_file_rounded,
+            label: 'Upload',
+            onTap: () => _pickGarageQr(ImageSource.gallery),
+          ),
+          const SizedBox(width: 8),
+          _qrIconActionButton(
+            icon: Icons.photo_camera_rounded,
+            tooltip: 'Camera',
+            onTap: () => _pickGarageQr(ImageSource.camera),
+          ),
+        ],
+      );
+    }
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _qrActionButton(
+          icon: Icons.ios_share_rounded,
+          label: 'Share',
+          onTap: _shareGarageQr,
+        ),
+        _qrActionButton(
+          icon: Icons.upload_file_rounded,
+          label: 'Change',
+          onTap: () => _pickGarageQr(ImageSource.gallery),
+        ),
+        _qrIconActionButton(
+          icon: Icons.delete_outline_rounded,
+          tooltip: 'Remove',
+          onTap: _removeGarageQr,
+        ),
+      ],
+    );
+  }
+
+  Widget _qrActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return SizedBox(
+      height: 36,
+      child: ElevatedButton.icon(
+        onPressed: onTap,
+        icon: Icon(icon, size: 16),
+        label: Text(label),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 11),
+          textStyle: GoogleFonts.lato(fontSize: 12, fontWeight: FontWeight.w900),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+        ),
+      ),
+    );
+  }
+
+  Widget _qrIconActionButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return SizedBox(
+      width: 38,
+      height: 36,
+      child: IconButton.filledTonal(
+        onPressed: onTap,
+        tooltip: tooltip,
+        icon: Icon(icon, size: 18),
+        style: IconButton.styleFrom(
+          foregroundColor: AppColors.primary,
+          backgroundColor: AppColors.primary.withValues(alpha: 0.10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _loadGaragePaymentQr() async {
+    final file = await GaragePaymentQrStorage.savedQrFile();
+    if (!mounted) return;
+    setState(() {
+      _garageQrFile = file;
+      _isQrLoading = false;
+    });
+  }
+
+  Future<void> _pickGarageQr(ImageSource source) async {
+    try {
+      final pickedFile = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 95,
+      );
+      if (pickedFile == null) return;
+
+      final savedFile = await GaragePaymentQrStorage.saveQrFromPath(
+        pickedFile.path,
+      );
+      if (!mounted) return;
+      setState(() => _garageQrFile = savedFile);
+      _showSnack('Garage QR saved. Ye ab invoice me bhi jayega.', Colors.green);
+    } catch (error) {
+      if (!mounted) return;
+      _showSnack('QR save failed: $error', Colors.red);
+    }
+  }
+
+  Future<void> _shareGarageQr() async {
+    final file = _garageQrFile;
+    if (file == null || !file.existsSync()) {
+      _showSnack('Pehle garage payment QR upload kare.', Colors.orange);
       return;
     }
 
-    _showGarageQrPaymentSheet(_parseGaragePaymentQr(scannedValue));
-  }
-
-  _GaragePaymentQrPayload _parseGaragePaymentQr(String rawValue) {
-    final raw = rawValue.trim();
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is Map) {
-        return _GaragePaymentQrPayload(
-          rawValue: raw,
-          invoiceId: _firstPayloadText(decoded, [
-            'invoice_id',
-            'invoiceId',
-            'bill_id',
-            'billId',
-            'id',
-            '_id',
-          ]),
-          amount: _firstPayloadInt(decoded, [
-            'amount',
-            'totalAmount',
-            'total_amount',
-            'grandTotal',
-            'total',
-          ]),
-          customerName: _firstPayloadText(decoded, [
-            'customer',
-            'customerName',
-            'name',
-          ]),
-          vehicleNumber: _firstPayloadText(decoded, [
-            'vehicle',
-            'vehicleNumber',
-            'vehicle_no',
-          ]),
-        );
-      }
-    } catch (_) {}
-
-    final invoiceMatch = RegExp(
-      r'(?:invoice|bill|id)[\s:=#-]+([A-Za-z0-9_\-]+)',
-      caseSensitive: false,
-    ).firstMatch(raw);
-    final amountMatch = RegExp(
-      r'(?:amount|amt|total|rs|inr)[\s:=₹-]+(\d+)',
-      caseSensitive: false,
-    ).firstMatch(raw);
-
-    return _GaragePaymentQrPayload(
-      rawValue: raw,
-      invoiceId: invoiceMatch?.group(1) ?? raw,
-      amount: int.tryParse(amountMatch?.group(1) ?? ''),
-    );
-  }
-
-  String? _firstPayloadText(Map<dynamic, dynamic> data, List<String> keys) {
-    for (final key in keys) {
-      final value = data[key];
-      final text = value?.toString().trim() ?? '';
-      if (text.isNotEmpty && text != 'null') return text;
-    }
-    return null;
-  }
-
-  int? _firstPayloadInt(Map<dynamic, dynamic> data, List<String> keys) {
-    for (final key in keys) {
-      final value = data[key];
-      if (value is int) return value;
-      if (value is num) return value.toInt();
-      final parsed = int.tryParse(value?.toString() ?? '');
-      if (parsed != null) return parsed;
-    }
-    return null;
-  }
-
-  Map<String, dynamic>? _findInvoiceForQr(_GaragePaymentQrPayload payload) {
-    final scannedId = payload.invoiceId?.toLowerCase().trim();
-    if (scannedId != null && scannedId.isNotEmpty) {
-      for (final invoice in _invoices) {
-        final id = _idOf(invoice).toLowerCase();
-        if (id == scannedId || id.endsWith(scannedId)) return invoice;
-      }
-    }
-
-    final amount = payload.amount;
-    if (amount != null) {
-      final matches = _pendingInvoices
-          .where((invoice) => _amountOf(invoice) == amount)
-          .toList();
-      if (matches.length == 1) return matches.first;
-    }
-
-    return null;
-  }
-
-  void _showGarageQrPaymentSheet(_GaragePaymentQrPayload payload) {
-    final matchedInvoice = _findInvoiceForQr(payload);
-    final pendingInvoices = _pendingInvoices;
-
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetContext) {
-        return SafeArea(
-          child: DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 0.64,
-            minChildSize: 0.38,
-            maxChildSize: 0.88,
-            builder: (context, scrollController) {
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(child: _sheetHandle()),
-                    Row(
-                      children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.withValues(alpha: 0.10),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: const Icon(
-                            Icons.qr_code_2_rounded,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                matchedInvoice == null
-                                    ? 'QR Scan Result'
-                                    : 'Bill matched from QR',
-                                style: GoogleFonts.lato(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w900,
-                                  color: AppColors.textPrimary,
-                                ),
-                              ),
-                              Text(
-                                payload.invoiceId == null
-                                    ? 'Scanned payment QR'
-                                    : 'Invoice: ${payload.invoiceId}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.lato(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.textSecondary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    if (matchedInvoice != null) ...[
-                      _buildQrMatchedInvoiceCard(sheetContext, matchedInvoice),
-                    ] else ...[
-                      _buildQrPayloadCard(payload),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Pending Bills',
-                        style: GoogleFonts.lato(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: pendingInvoices.isEmpty
-                            ? Center(
-                                child: Text(
-                                  context.tr('no_pending_bills'),
-                                  style: GoogleFonts.lato(
-                                    color: AppColors.textSecondary,
-                                  ),
-                                ),
-                              )
-                            : ListView.builder(
-                                controller: scrollController,
-                                itemCount: pendingInvoices.length,
-                                itemBuilder: (context, index) {
-                                  final invoice = pendingInvoices[index];
-                                  return _buildQrSelectableInvoiceTile(
-                                    sheetContext,
-                                    invoice,
-                                  );
-                                },
-                              ),
-                      ),
-                    ],
-                  ],
-                ),
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildQrPayloadCard(_GaragePaymentQrPayload payload) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFD),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE5EAF2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _qrInfoLine('Invoice', payload.invoiceId ?? 'Not found'),
-          _qrInfoLine(
-            'Amount',
-            payload.amount == null ? 'Not found' : '₹${_formatAmount(payload.amount!)}',
-          ),
-          _qrInfoLine('Customer', payload.customerName ?? 'Not found'),
-          _qrInfoLine('Vehicle', payload.vehicleNumber ?? 'Not found'),
-          const SizedBox(height: 8),
-          Text(
-            payload.rawValue,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 11,
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ],
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path)],
+        text: 'Garage payment QR',
+        subject: 'Garage payment QR',
       ),
     );
   }
 
-  Widget _buildQrMatchedInvoiceCard(
-    BuildContext sheetContext,
-    Map<String, dynamic> invoice,
-  ) {
-    final id = _idOf(invoice);
-    final customer = _text(invoice['customerName'] ?? invoice['customer']);
-    final vehicle = _text(invoice['vehicleNumber'], fallback: 'Vehicle N/A');
-    final amount = _amountOf(invoice);
-    final isPaid = _statusOf(invoice) == 'paid';
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFD),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE5EAF2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _qrInfoLine('Customer', customer.isEmpty ? 'Customer' : customer),
-          _qrInfoLine('Vehicle', vehicle),
-          _qrInfoLine('Bill', id.isEmpty ? 'N/A' : _shortId(id)),
-          _qrInfoLine('Amount', '₹${_formatAmount(amount)}'),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed:
-                  isPaid || id.isEmpty ? null : () => _markInvoicePaid(sheetContext, id),
-              icon: Icon(isPaid ? Icons.verified_rounded : Icons.payments_rounded),
-              label: Text(isPaid ? 'Already Paid' : 'Mark Paid'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                minimumSize: const Size.fromHeight(46),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  Future<void> _removeGarageQr() async {
+    await GaragePaymentQrStorage.clearSavedQr();
+    if (!mounted) return;
+    setState(() => _garageQrFile = null);
+    _showSnack('Garage QR removed.', Colors.green);
   }
 
-  Widget _buildQrSelectableInvoiceTile(
-    BuildContext sheetContext,
-    Map<String, dynamic> invoice,
-  ) {
-    final id = _idOf(invoice);
-    final customer = _text(invoice['customerName'] ?? invoice['customer']);
-    final vehicle = _text(invoice['vehicleNumber'], fallback: 'Vehicle N/A');
-    final amount = _amountOf(invoice);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.divider),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.receipt_long_rounded, color: AppColors.primary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  customer.isEmpty ? 'Customer' : customer,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.lato(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                Text(
-                  '$vehicle | ₹${_formatAmount(amount)}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.lato(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          TextButton(
-            onPressed: id.isEmpty ? null : () => _markInvoicePaid(sheetContext, id),
-            child: const Text('Pay'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _qrInfoLine(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 7),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 78,
-            child: Text(
-              label,
-              style: GoogleFonts.lato(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.lato(
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  void _showSnack(String message, Color color) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message), backgroundColor: color));
   }
 
   Widget _buildStateBox({
@@ -1146,278 +924,6 @@ class _BillPaymentScreenState extends State<BillPaymentScreen> {
     }
     return buffer.toString();
   }
-}
-
-class _GaragePaymentQrPayload {
-  final String rawValue;
-  final String? invoiceId;
-  final int? amount;
-  final String? customerName;
-  final String? vehicleNumber;
-
-  const _GaragePaymentQrPayload({
-    required this.rawValue,
-    this.invoiceId,
-    this.amount,
-    this.customerName,
-    this.vehicleNumber,
-  });
-}
-
-class _GaragePaymentQrScannerPage extends StatefulWidget {
-  const _GaragePaymentQrScannerPage();
-
-  @override
-  State<_GaragePaymentQrScannerPage> createState() =>
-      _GaragePaymentQrScannerPageState();
-}
-
-class _GaragePaymentQrScannerPageState
-    extends State<_GaragePaymentQrScannerPage> {
-  late final MobileScannerController _controller;
-  bool _isHandlingScan = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = MobileScannerController(
-      detectionSpeed: DetectionSpeed.noDuplicates,
-      formats: const [BarcodeFormat.qrCode],
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        surfaceTintColor: Colors.black,
-        elevation: 0,
-        title: Text(
-          'Scan Garage QR',
-          style: GoogleFonts.lato(fontWeight: FontWeight.w900),
-        ),
-        actions: [
-          IconButton(
-            onPressed: () => _controller.toggleTorch(),
-            icon: const Icon(Icons.flash_on_rounded),
-            tooltip: 'Flash',
-          ),
-          IconButton(
-            onPressed: () => _controller.switchCamera(),
-            icon: const Icon(Icons.cameraswitch_rounded),
-            tooltip: 'Switch camera',
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          MobileScanner(
-            controller: _controller,
-            fit: BoxFit.cover,
-            onDetect: _handleDetectedBarcode,
-            errorBuilder: (context, error) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(
-                    'Camera open nahi ho pa raha. Permission check kare ya Test QR use kare.',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.lato(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      height: 1.35,
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-          Positioned.fill(
-            child: IgnorePointer(
-              child: CustomPaint(painter: _GarageQrScanFramePainter()),
-            ),
-          ),
-          Positioned(
-            left: 18,
-            right: 18,
-            bottom: 28,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.55),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.18),
-                    ),
-                  ),
-                  child: Text(
-                    'Garage payment QR ko frame ke andar rakhe. Scan ke baad bill match/pay option dikhega.',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.lato(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      height: 1.35,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _openTestQrDialog,
-                    icon: const Icon(Icons.keyboard_rounded),
-                    label: const Text('Test QR'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white),
-                      minimumSize: const Size.fromHeight(44),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _handleDetectedBarcode(BarcodeCapture capture) {
-    if (_isHandlingScan) return;
-
-    final rawValue = capture.barcodes
-        .map((barcode) => barcode.rawValue?.trim())
-        .whereType<String>()
-        .where((value) => value.isNotEmpty)
-        .firstOrNull;
-
-    if (rawValue == null) return;
-
-    _isHandlingScan = true;
-    Navigator.pop(context, rawValue);
-  }
-
-  Future<void> _openTestQrDialog() async {
-    final controller = TextEditingController(
-      text: '{"invoiceId":"TEST-BILL-001","amount":500}',
-    );
-    final value = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: Text(
-            'Test Garage QR',
-            style: GoogleFonts.lato(fontWeight: FontWeight.w900),
-          ),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: const InputDecoration(
-              hintText: '{"invoiceId":"...","amount":500}',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              child: const Text('Use'),
-            ),
-          ],
-        );
-      },
-    );
-    controller.dispose();
-
-    if (!mounted || value == null || value.trim().isEmpty) return;
-    Navigator.pop(context, value.trim());
-  }
-}
-
-class _GarageQrScanFramePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final overlayPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.48)
-      ..style = PaintingStyle.fill;
-    final frameSize = (size.width * 0.72).clamp(220.0, 310.0);
-    final frameRect = Rect.fromCenter(
-      center: Offset(size.width / 2, size.height * 0.42),
-      width: frameSize,
-      height: frameSize,
-    );
-    final fullPath = Path()..addRect(Offset.zero & size);
-    final cutoutPath = Path()
-      ..addRRect(
-        RRect.fromRectAndRadius(frameRect, const Radius.circular(22)),
-      );
-    canvas.drawPath(
-      Path.combine(PathOperation.difference, fullPath, cutoutPath),
-      overlayPaint,
-    );
-
-    final borderPaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(frameRect, const Radius.circular(22)),
-      borderPaint,
-    );
-
-    final cornerPaint = Paint()
-      ..color = AppColors.primary
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 6
-      ..strokeCap = StrokeCap.round;
-    const cornerLength = 34.0;
-    final corners = [
-      (frameRect.topLeft, 1, 1),
-      (frameRect.topRight, -1, 1),
-      (frameRect.bottomLeft, 1, -1),
-      (frameRect.bottomRight, -1, -1),
-    ];
-    for (final corner in corners) {
-      final point = corner.$1;
-      final horizontalDirection = corner.$2;
-      final verticalDirection = corner.$3;
-      canvas.drawLine(
-        point,
-        point + Offset(cornerLength * horizontalDirection, 0),
-        cornerPaint,
-      );
-      canvas.drawLine(
-        point,
-        point + Offset(0, cornerLength * verticalDirection),
-        cornerPaint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _BillingBox extends StatelessWidget {
